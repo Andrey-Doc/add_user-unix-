@@ -26,6 +26,7 @@ An interactive bash script for creating and managing users in Linux with advance
 - 🏗️ **Environment Setup** - Create useful directories and configs
 - 🔍 **System Validation** - Check system requirements
 - 🛡️ **Enhanced Security** - Better input validation and safety checks
+- 📋 **Settings Copy** - Copy user settings from one user to another
 
 ## Installation
 
@@ -51,7 +52,7 @@ sudo ./add_user_enhanced.sh
 
 ### Enhanced Menu Options
 
-The enhanced script provides 7 main options:
+The enhanced script provides 8 main options:
 
 1. **Add New User** - Interactive user creation
 2. **Create Users from File** - Batch user creation from CSV
@@ -59,7 +60,8 @@ The enhanced script provides 7 main options:
 4. **Delete User** - Remove user with backup option
 5. **Show User Information** - Display detailed user info
 6. **Create User Backup** - Backup specific user
-7. **Exit** - Quit the script
+7. **Copy User Settings** - Copy settings from one user to another
+8. **Exit** - Quit the script
 
 ## Step-by-Step Guide
 
@@ -119,6 +121,33 @@ Use option 3 to export all users to a CSV file with their configurations.
 ### 4. User Deletion
 
 Use option 4 to safely delete users with backup creation option.
+
+### 5. Copy User Settings
+
+Use option 7 to copy settings from one user to another. This function allows:
+
+**What gets copied:**
+- SSH keys and configuration (`.ssh/`)
+- Shell settings (`.bashrc`, `.zshrc`, `.profile`)
+- Application settings (`.config/`, `.mozilla`, `.thunderbird`)
+- Terminal settings (`.inputrc`, `.screenrc`, `.tmux.conf`)
+- Desktop folders (Desktop, Documents, Downloads, etc.)
+- Sudo rights and system limits
+- Editor settings (`.vimrc`, `.vim`)
+
+**Copy options:**
+1. **All settings** - Complete copy of all settings
+2. **SSH only** - Copy SSH keys and configuration
+3. **Shell only** - Copy shell settings
+4. **Applications only** - Copy application settings
+5. **System only** - Copy sudo rights and limits
+6. **Selective** - Choose specific files to copy
+
+**Security:**
+- Automatic backup creation before copying
+- Proper permission setting
+- User existence validation
+- Comprehensive logging
 
 ## Examples
 
@@ -276,6 +305,15 @@ ls -la /root/user_backups/
 - Copies default configuration files
 - Sets proper ownership and permissions
 
+### 8. User Settings Copy
+- Complete copy of all settings from one user to another
+- Selective copying of specific settings
+- SSH keys and configuration copying
+- Shell and application settings copying
+- Sudo rights and system limits copying
+- Automatic backup creation
+- Secure permission setting
+
 ## CSV File Format for Batch Import
 
 ```csv
@@ -306,6 +344,7 @@ admin,Admin User,/bin/bash,sudo,3,yes
 - Added environment setup
 - Added automatic password setting
 - Added system requirements validation
+- Added user settings copy functionality
 - Enhanced security features
 - Improved error handling
 

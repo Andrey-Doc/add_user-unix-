@@ -505,7 +505,8 @@ show_menu() {
     echo "4) Удалить пользователя"
     echo "5) Показать информацию о пользователе"
     echo "6) Создать резервную копию пользователя"
-    echo "7) Выход"
+    echo "7) Копировать настройки пользователя"
+    echo "8) Выход"
     echo
 }
 
@@ -678,6 +679,523 @@ get_user_info() {
     fi
 }
 
+# Функция для копирования настроек пользователя
+copy_user_settings() {
+    local source_user=$1
+    local target_user=$2
+    
+    if ! user_exists "$source_user"; then
+        print_color $RED "Пользователь-источник $source_user не существует"
+        log_message "ERROR" "Пользователь-источник $source_user не существует"
+        return 1
+    fi
+    
+    if ! user_exists "$target_user"; then
+        print_color $RED "Пользователь-назначение $target_user не существует"
+        log_message "ERROR" "Пользователь-назначение $target_user не существует"
+        return 1
+    fi
+    
+    print_color $BLUE "Копирование настроек от $source_user к $target_user"
+    log_message "INFO" "Начинаем копирование настроек от $source_user к $target_user"
+    
+    local source_home="/home/$source_user"
+    local target_home="/home/$target_user"
+    
+    # Создаем резервную копию целевого пользователя
+    create_backup "$target_user"
+    
+    # Массив файлов и директорий для копирования
+    local items_to_copy=(
+        ".zshrc"
+        ".zsh_history"
+        ".bashrc"
+        ".bash_profile"
+        ".bash_history"
+        ".profile"
+        ".ssh"
+        ".vimrc"
+        ".vim"
+        ".gitconfig"
+        ".config"
+        ".local"
+        ".cache"
+        ".gnupg"
+        ".ssh/authorized_keys"
+        ".ssh/id_rsa"
+        ".ssh/id_rsa.pub"
+        ".ssh/id_ed25519"
+        ".ssh/id_ed25519.pub"
+        ".ssh/known_hosts"
+        ".ssh/config"
+    )
+    
+    local copied_count=0
+    local skipped_count=0
+    local error_count=0
+    
+    for item in "${items_to_copy[@]}"; do
+        local source_path="$source_home/$item"
+        local target_path="$target_home/$item"
+        
+        if [[ -e "$source_path" ]]; then
+            # Создаем родительскую директорию если нужно
+            local target_dir=$(dirname "$target_path")
+            if [[ ! -d "$target_dir" ]]; then
+                mkdir -p "$target_dir"
+            fi
+            
+            # Копируем файл или директорию
+            if cp -r "$source_path" "$target_path" 2>/dev/null; then
+                # Устанавливаем правильные права
+                chown -R "$target_user:$target_user" "$target_path"
+                
+                # Специальные права для SSH
+                if [[ "$item" == ".ssh" ]] || [[ "$item" == *".ssh/"* ]]; then
+                    chmod 700 "$target_home/.ssh"
+                    chmod 600 "$target_home/.ssh/"*
+                    chmod 644 "$target_home/.ssh/"*.pub 2>/dev/null || true
+                fi
+                
+                print_color $GREEN "Скопирован: $item"
+                log_message "INFO" "Скопирован $item от $source_user к $target_user"
+                ((copied_count++))
+            else
+                print_color $RED "Ошибка при копировании: $item"
+                log_message "ERROR" "Ошибка при копировании $item от $source_user к $target_user"
+                ((error_count++))
+            fi
+        else
+            print_color $YELLOW "Пропущен (не существует): $item"
+            ((skipped_count++))
+        fi
+    done
+    
+    # Копируем дополнительные настройки
+    copy_additional_settings "$source_user" "$target_user"
+    
+    # Копируем sudo права если есть
+    if [[ -f "/etc/sudoers.d/$source_user" ]]; then
+        if cp "/etc/sudoers.d/$source_user" "/etc/sudoers.d/$target_user"; then
+            # Заменяем имя пользователя в файле
+            sed -i "s/$source_user/$target_user/g" "/etc/sudoers.d/$target_user"
+            print_color $GREEN "Скопированы sudo права"
+            log_message "INFO" "Скопированы sudo права от $source_user к $target_user"
+            ((copied_count++))
+        else
+            print_color $RED "Ошибка при копировании sudo прав"
+            log_message "ERROR" "Ошибка при копировании sudo прав от $source_user к $target_user"
+            ((error_count++))
+        fi
+    fi
+    
+    # Копируем системные ограничения если есть
+    if [[ -f "/etc/security/limits.d/$source_user.conf" ]]; then
+        if cp "/etc/security/limits.d/$source_user.conf" "/etc/security/limits.d/$target_user.conf"; then
+            # Заменяем имя пользователя в файле
+            sed -i "s/$source_user/$target_user/g" "/etc/security/limits.d/$target_user.conf"
+            print_color $GREEN "Скопированы системные ограничения"
+            log_message "INFO" "Скопированы системные ограничения от $source_user к $target_user"
+            ((copied_count++))
+        else
+            print_color $RED "Ошибка при копировании системных ограничений"
+            log_message "ERROR" "Ошибка при копировании системных ограничений от $source_user к $target_user"
+            ((error_count++))
+        fi
+    fi
+    
+    # Сводка
+    echo
+    print_color $BLUE "=== Сводка копирования настроек ==="
+    echo "Скопировано элементов: $copied_count"
+    echo "Пропущено элементов: $skipped_count"
+    echo "Ошибок: $error_count"
+    echo
+    
+    if [[ $error_count -eq 0 ]]; then
+        print_color $GREEN "Копирование настроек завершено успешно!"
+        log_message "INFO" "Копирование настроек от $source_user к $target_user завершено успешно"
+    else
+        print_color $YELLOW "Копирование завершено с ошибками"
+        log_message "WARNING" "Копирование настроек от $source_user к $target_user завершено с ошибками"
+    fi
+}
+
+# Функция для копирования дополнительных настроек
+copy_additional_settings() {
+    local source_user=$1
+    local target_user=$2
+    
+    local source_home="/home/$source_user"
+    local target_home="/home/$target_user"
+    
+    # Копируем настройки приложений
+    local app_configs=(
+        ".mozilla"
+        ".thunderbird"
+        ".config/Code"
+        ".config/google-chrome"
+        ".config/firefox"
+        ".config/telegram"
+        ".config/slack"
+        ".config/discord"
+        ".config/spotify"
+        ".config/atom"
+        ".config/sublime-text"
+        ".config/gedit"
+        ".config/nautilus"
+        ".config/evolution"
+        ".config/gnome"
+        ".config/kde"
+        ".config/xfce4"
+        ".config/autostart"
+        ".config/autostart-scripts"
+    )
+    
+    for config in "${app_configs[@]}"; do
+        local source_config="$source_home/$config"
+        local target_config="$target_home/$config"
+        
+        if [[ -d "$source_config" ]]; then
+            local target_dir=$(dirname "$target_config")
+            if [[ ! -d "$target_dir" ]]; then
+                mkdir -p "$target_dir"
+            fi
+            
+            if cp -r "$source_config" "$target_config" 2>/dev/null; then
+                chown -R "$target_user:$target_user" "$target_config"
+                print_color $GREEN "Скопированы настройки приложения: $config"
+                log_message "INFO" "Скопированы настройки приложения $config от $source_user к $target_user"
+            fi
+        fi
+    done
+    
+    # Копируем настройки рабочего стола
+    local desktop_items=(
+        "Desktop"
+        "Documents"
+        "Downloads"
+        "Pictures"
+        "Music"
+        "Videos"
+        "Templates"
+        "Public"
+    )
+    
+    for item in "${desktop_items[@]}"; do
+        local source_item="$source_home/$item"
+        local target_item="$target_home/$item"
+        
+        if [[ -d "$source_item" ]]; then
+            if cp -r "$source_item" "$target_item" 2>/dev/null; then
+                chown -R "$target_user:$target_user" "$target_item"
+                print_color $GREEN "Скопирована папка: $item"
+                log_message "INFO" "Скопирована папка $item от $source_user к $target_user"
+            fi
+        fi
+    done
+    
+    # Копируем настройки терминала
+    local terminal_configs=(
+        ".inputrc"
+        ".screenrc"
+        ".tmux.conf"
+        ".config/alacritty"
+        ".config/kitty"
+        ".config/terminator"
+        ".config/gnome-terminal"
+        ".config/konsole"
+    )
+    
+    for term_config in "${terminal_configs[@]}"; do
+        local source_term="$source_home/$term_config"
+        local target_term="$target_home/$term_config"
+        
+        if [[ -e "$source_term" ]]; then
+            local target_dir=$(dirname "$target_term")
+            if [[ ! -d "$target_dir" ]]; then
+                mkdir -p "$target_dir"
+            fi
+            
+            if cp -r "$source_term" "$target_term" 2>/dev/null; then
+                chown -R "$target_user:$target_user" "$target_term"
+                print_color $GREEN "Скопированы настройки терминала: $term_config"
+                log_message "INFO" "Скопированы настройки терминала $term_config от $source_user к $target_user"
+            fi
+        fi
+    done
+}
+
+# Функция для выбора настроек для копирования
+select_settings_to_copy() {
+    local source_user=$1
+    local target_user=$2
+    
+    print_color $BLUE "=== Выбор настроек для копирования ==="
+    echo "Источник: $source_user"
+    echo "Назначение: $target_user"
+    echo
+    
+    print_color $YELLOW "Выберите настройки для копирования:"
+    echo "1) Все настройки (рекомендуется)"
+    echo "2) Только SSH ключи и конфигурацию"
+    echo "3) Только настройки shell (.bashrc, .zshrc, etc.)"
+    echo "4) Только настройки приложений"
+    echo "5) Только sudo права и системные ограничения"
+    echo "6) Выборочное копирование"
+    echo "7) Отмена"
+    
+    read -p "Выберите опцию (1-7): " copy_choice
+    
+    case $copy_choice in
+        1)
+            copy_user_settings "$source_user" "$target_user"
+            ;;
+        2)
+            copy_ssh_only "$source_user" "$target_user"
+            ;;
+        3)
+            copy_shell_only "$source_user" "$target_user"
+            ;;
+        4)
+            copy_apps_only "$source_user" "$target_user"
+            ;;
+        5)
+            copy_system_only "$source_user" "$target_user"
+            ;;
+        6)
+            copy_selective "$source_user" "$target_user"
+            ;;
+        7)
+            print_color $YELLOW "Копирование отменено"
+            return 0
+            ;;
+        *)
+            print_color $RED "Неверный выбор"
+            return 1
+            ;;
+    esac
+}
+
+# Функция для копирования только SSH
+copy_ssh_only() {
+    local source_user=$1
+    local target_user=$2
+    
+    print_color $BLUE "Копирование только SSH настроек от $source_user к $target_user"
+    
+    local source_home="/home/$source_user"
+    local target_home="/home/$target_user"
+    
+    # Создаем .ssh директорию
+    mkdir -p "$target_home/.ssh"
+    chown "$target_user:$target_user" "$target_home/.ssh"
+    chmod 700 "$target_home/.ssh"
+    
+    # Копируем SSH файлы
+    local ssh_files=(
+        ".ssh/authorized_keys"
+        ".ssh/id_rsa"
+        ".ssh/id_rsa.pub"
+        ".ssh/id_ed25519"
+        ".ssh/id_ed25519.pub"
+        ".ssh/known_hosts"
+        ".ssh/config"
+    )
+    
+    for ssh_file in "${ssh_files[@]}"; do
+        local source_file="$source_home/$ssh_file"
+        local target_file="$target_home/$ssh_file"
+        
+        if [[ -e "$source_file" ]]; then
+            if cp "$source_file" "$target_file" 2>/dev/null; then
+                chown "$target_user:$target_user" "$target_file"
+                if [[ "$ssh_file" == *".pub" ]]; then
+                    chmod 644 "$target_file"
+                else
+                    chmod 600 "$target_file"
+                fi
+                print_color $GREEN "Скопирован: $ssh_file"
+            fi
+        fi
+    done
+    
+    print_color $GREEN "SSH настройки скопированы"
+}
+
+# Функция для копирования только shell настроек
+copy_shell_only() {
+    local source_user=$1
+    local target_user=$2
+    
+    print_color $BLUE "Копирование настроек shell от $source_user к $target_user"
+    
+    local source_home="/home/$source_user"
+    local target_home="/home/$target_user"
+    
+    local shell_files=(
+        ".bashrc"
+        ".bash_profile"
+        ".bash_history"
+        ".zshrc"
+        ".zsh_history"
+        ".profile"
+        ".inputrc"
+    )
+    
+    for shell_file in "${shell_files[@]}"; do
+        local source_file="$source_home/$shell_file"
+        local target_file="$target_home/$shell_file"
+        
+        if [[ -e "$source_file" ]]; then
+            if cp "$source_file" "$target_file" 2>/dev/null; then
+                chown "$target_user:$target_user" "$target_file"
+                print_color $GREEN "Скопирован: $shell_file"
+            fi
+        fi
+    done
+    
+    print_color $GREEN "Настройки shell скопированы"
+}
+
+# Функция для копирования только настроек приложений
+copy_apps_only() {
+    local source_user=$1
+    local target_user=$2
+    
+    print_color $BLUE "Копирование настроек приложений от $source_user к $target_user"
+    
+    copy_additional_settings "$source_user" "$target_user"
+    
+    print_color $GREEN "Настройки приложений скопированы"
+}
+
+# Функция для копирования только системных настроек
+copy_system_only() {
+    local source_user=$1
+    local target_user=$2
+    
+    print_color $BLUE "Копирование системных настроек от $source_user к $target_user"
+    
+    # Копируем sudo права
+    if [[ -f "/etc/sudoers.d/$source_user" ]]; then
+        if cp "/etc/sudoers.d/$source_user" "/etc/sudoers.d/$target_user"; then
+            sed -i "s/$source_user/$target_user/g" "/etc/sudoers.d/$target_user"
+            print_color $GREEN "Скопированы sudo права"
+        fi
+    fi
+    
+    # Копируем системные ограничения
+    if [[ -f "/etc/security/limits.d/$source_user.conf" ]]; then
+        if cp "/etc/security/limits.d/$source_user.conf" "/etc/security/limits.d/$target_user.conf"; then
+            sed -i "s/$source_user/$target_user/g" "/etc/security/limits.d/$target_user.conf"
+            print_color $GREEN "Скопированы системные ограничения"
+        fi
+    fi
+    
+    print_color $GREEN "Системные настройки скопированы"
+}
+
+# Функция для выборочного копирования
+copy_selective() {
+    local source_user=$1
+    local target_user=$2
+    
+    print_color $BLUE "Выборочное копирование настроек от $source_user к $target_user"
+    
+    local source_home="/home/$source_user"
+    local target_home="/home/$target_user"
+    
+    # Показываем доступные файлы
+    print_color $YELLOW "Доступные файлы и директории:"
+    local available_items=()
+    local i=1
+    
+    for item in "$source_home"/.* "$source_home"/*; do
+        if [[ -e "$item" ]] && [[ "$item" != "$source_home/." ]] && [[ "$item" != "$source_home/.." ]]; then
+            local basename_item=$(basename "$item")
+            echo "$i) $basename_item"
+            available_items+=("$basename_item")
+            ((i++))
+        fi
+    done
+    
+    echo
+    read -p "Выберите номера файлов для копирования (через запятую): " selected_items
+    
+    IFS=',' read -ra SELECTED <<< "$selected_items"
+    
+    for index in "${SELECTED[@]}"; do
+        if [[ "$index" =~ ^[0-9]+$ ]] && [[ "$index" -gt 0 ]] && [[ "$index" -le ${#available_items[@]} ]]; then
+            local selected_item="${available_items[$((index-1))]}"
+            local source_item="$source_home/$selected_item"
+            local target_item="$target_home/$selected_item"
+            
+            if cp -r "$source_item" "$target_item" 2>/dev/null; then
+                chown -R "$target_user:$target_user" "$target_item"
+                print_color $GREEN "Скопирован: $selected_item"
+            else
+                print_color $RED "Ошибка при копировании: $selected_item"
+            fi
+        fi
+    done
+    
+    print_color $GREEN "Выборочное копирование завершено"
+}
+
+# Функция меню для копирования настроек пользователя
+copy_user_settings_menu() {
+    print_color $BLUE "=== Копирование настроек пользователя ==="
+    echo
+    
+    # Ввод пользователя-источника
+    while true; do
+        read -p "Введите имя пользователя-источника: " source_user
+        if [[ -z "$source_user" ]]; then
+            print_color $RED "Имя пользователя не может быть пустым"
+            continue
+        fi
+        if ! user_exists "$source_user"; then
+            print_color $RED "Пользователь $source_user не существует"
+            continue
+        fi
+        break
+    done
+    
+    # Ввод пользователя-назначения
+    while true; do
+        read -p "Введите имя пользователя-назначения: " target_user
+        if [[ -z "$target_user" ]]; then
+            print_color $RED "Имя пользователя не может быть пустым"
+            continue
+        fi
+        if ! user_exists "$target_user"; then
+            print_color $RED "Пользователь $target_user не существует"
+            continue
+        fi
+        if [[ "$source_user" == "$target_user" ]]; then
+            print_color $RED "Пользователь-источник и пользователь-назначение не могут быть одинаковыми"
+            continue
+        fi
+        break
+    done
+    
+    # Показываем информацию о пользователях
+    echo
+    print_color $BLUE "Информация о пользователях:"
+    echo "Источник: $source_user (UID: $(id -u "$source_user"))"
+    echo "Назначение: $target_user (UID: $(id -u "$target_user"))"
+    echo
+    
+    # Подтверждение
+    read -p "Продолжить копирование настроек? (y/n): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        select_settings_to_copy "$source_user" "$target_user"
+    else
+        print_color $YELLOW "Копирование отменено"
+    fi
+}
+
 # Основная функция
 main() {
     check_root
@@ -733,6 +1251,11 @@ main() {
                 read -p "Нажмите Enter для продолжения..."
                 ;;
             7)
+                copy_user_settings_menu
+                echo
+                read -p "Нажмите Enter для продолжения..."
+                ;;
+            8)
                 print_color $GREEN "До свидания!"
                 log_message "INFO" "Скрипт завершен"
                 exit 0
