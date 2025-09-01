@@ -45,7 +45,6 @@ bash
 sudo dnf install openssl newt
 
 📁 File Structure
-text
 
 /
 ├── add_user.sh                  # Main script
