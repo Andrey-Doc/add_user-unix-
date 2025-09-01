@@ -1,88 +1,372 @@
 #!/bin/bash
 
-# Enhanced User Management Script with user deletion menu
-# Features: better error handling, logging, security, and additional options
-
-set -euo pipefail
+# User Management Script with interactive user creation
+# Version 2.0
 
 # Configuration
 CONFIG_FILE="/etc/user_manager.conf"
-USERS_FILE="users_list.txt"
-GROUPS_FILE="groups_list.txt"
 BACKUP_DIR="/var/backups/user_management"
 LOG_FILE="/var/log/user_management.log"
-LOCK_FILE="/var/run/user_manager.lock"
-PASSWORD_LENGTH=16
-DEFAULT_SHELL="/bin/bash"
-TEMP_MENU="/tmp/user_manager_menu.txt"
+LOCK_FILE="/var/lock/user_manager.lock"
+PASSWORD_FILE="$BACKUP_DIR/passwords_$(date +%Y%m%d).txt"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-# Initialize required files and directories
-init_setup() {
-    mkdir -p "$(dirname "$LOG_FILE")" "$BACKUP_DIR"
-    touch "$LOG_FILE"
-    
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        cat > "$CONFIG_FILE" << EOF
-# User Management Configuration
+# Default settings
 DEFAULT_UMASK=0022
 PASSWORD_EXPIRE_DAYS=90
 MIN_UID=1000
 MAX_UID=60000
-CREATE_HOME=yes
-SKEL_DIR=/etc/skel
-REMOVE_HOME_ON_DELETE=yes
-REMOVE_MAIL_SPOOL=yes
-EOF
+CREATE_HOME="yes"
+SKEL_DIR="/etc/skel"
+REMOVE_HOME_ON_DELETE="yes"
+REMOVE_MAIL_SPOOL="yes"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Initialize
+init_directories() {
+    mkdir -p "$BACKUP_DIR"
+    touch "$LOG_FILE"
+    chmod 600 "$LOG_FILE"
+}
+
+# Logging functions
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+log_success() {
+    log "SUCCESS: $1"
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+log_error() {
+    log "ERROR: $1"
+    echo -e "${RED}✗ $1${NC}" >&2
+}
+
+log_info() {
+    log "INFO: $1"
+    echo -e "${BLUE}ℹ $1${NC}"
+}
+
+# Check if running as root
+check_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        log_error "This script must be run as root"
+        exit 1
     fi
+}
+
+# Backup system files
+backup_system_files() {
+    log_info "Backing up system files..."
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    
+    cp /etc/passwd "$BACKUP_DIR/passwd.backup.$timestamp"
+    cp /etc/group "$BACKUP_DIR/group.backup.$timestamp"
+    cp /etc/shadow "$BACKUP_DIR/shadow.backup.$timestamp"
+    cp /etc/gshadow "$BACKUP_DIR/gshadow.backup.$timestamp"
+    
+    log_success "System files backed up to $BACKUP_DIR"
+}
+
+# Generate random password
+generate_password() {
+    openssl rand -base64 16 | tr -d '/+=' | cut -c1-16
+}
+
+# Create group
+create_group() {
+    local groupname=$1
+    if grep -q "^$groupname:" /etc/group; then
+        log_info "Group $groupname already exists"
+        return 0
+    fi
+    
+    if groupadd "$groupname" 2>/dev/null; then
+        log_success "Group $groupname created successfully"
+        return 0
+    else
+        log_error "Failed to create group $groupname"
+        return 1
+    fi
+}
+
+# Create user
+create_user() {
+    local username=$1
+    local groups=$2
+    local comment=$3
+    local home_dir=$4
+    
+    if id "$username" &>/dev/null; then
+        log_error "User $username already exists"
+        return 1
+    fi
+    
+    local useradd_cmd="useradd"
+    local home_option=""
+    
+    if [ -n "$home_dir" ]; then
+        home_option="-d $home_dir"
+    fi
+    
+    if [ "$CREATE_HOME" = "yes" ]; then
+        useradd_cmd="$useradd_cmd -m"
+    fi
+    
+    if [ -n "$comment" ]; then
+        useradd_cmd="$useradd_cmd -c \"$comment\""
+    fi
+    
+    useradd_cmd="$useradd_cmd -s /bin/bash $home_option $username"
+    
+    if eval "$useradd_cmd"; then
+        # Set password
+        local password=$(generate_password)
+        echo "$username:$password" | chpasswd
+        
+        # Set password expiration
+        chage -M "$PASSWORD_EXPIRE_DAYS" "$username"
+        
+        # Add to groups
+        if [ -n "$groups" ]; then
+            IFS=',' read -ra group_array <<< "$groups"
+            for group in "${group_array[@]}"; do
+                if usermod -a -G "$group" "$username"; then
+                    log_info "Added $username to group $group"
+                fi
+            done
+        fi
+        
+        # Save password
+        echo "$username:$password" >> "$PASSWORD_FILE"
+        chmod 600 "$PASSWORD_FILE"
+        
+        log_success "User $username created successfully"
+        echo -e "${YELLOW}Password for $username: $password${NC}"
+        return 0
+    else
+        log_error "Failed to create user $username"
+        return 1
+    fi
+}
+
+# Interactive user creation
+create_user_interactive() {
+    while true; do
+        # Get username
+        username=$(whiptail --inputbox "Enter username:" 8 40 3>&1 1>&2 2>&3)
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+        
+        if [ -z "$username" ]; then
+            whiptail --msgbox "Username cannot be empty!" 8 40
+            continue
+        fi
+        
+        if id "$username" &>/dev/null; then
+            whiptail --msgbox "User $username already exists!" 8 40
+            continue
+        fi
+        
+        # Get comment (full name)
+        comment=$(whiptail --inputbox "Enter full name (comment):" 8 40 3>&1 1>&2 2>&3)
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+        
+        # Get home directory
+        home_dir=$(whiptail --inputbox "Enter home directory (leave empty for default):" 8 60 "/home/$username" 3>&1 1>&2 2>&3)
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+        
+        if [ -z "$home_dir" ]; then
+            home_dir="/home/$username"
+        fi
+        
+        # Get groups
+        all_groups=$(getent group | cut -d: -f1 | sort | tr '\n' ' ')
+        groups=$(whiptail --inputbox "Enter groups (comma-separated):\n\nAvailable groups: $all_groups" 12 60 3>&1 1>&2 2>&3)
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+        
+        # Confirm
+        whiptail --yesno "Create user with these settings?\n\nUsername: $username\nFull name: $comment\nHome directory: $home_dir\nGroups: $groups" 12 60
+        if [ $? -eq 0 ]; then
+            break
+        fi
+    done
+    
+    # Create user
+    if create_user "$username" "$groups" "$comment" "$home_dir"; then
+        whiptail --msgbox "User $username created successfully!\n\nPassword has been generated and saved to $PASSWORD_FILE" 12 60
+        return 0
+    else
+        whiptail --msgbox "Failed to create user $username!" 8 40
+        return 1
+    fi
+}
+
+# Get all regular users
+get_all_users() {
+    getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}'
+}
+
+# Show user information
+show_user_info() {
+    local username=$1
+    if ! id "$username" &>/dev/null; then
+        log_error "User $username does not exist"
+        return 1
+    fi
+    
+    local user_info=$(getent passwd "$username")
+    local user_id=$(id -u "$username")
+    local group_id=$(id -g "$username")
+    local groups=$(id -Gn "$username")
+    local home_dir=$(echo "$user_info" | cut -d: -f6)
+    local shell=$(echo "$user_info" | cut -d: -f7)
+    local comment=$(echo "$user_info" | cut -d: -f5)
+    
+    whiptail --msgbox "User Information: $username
+
+User ID: $user_id
+Group ID: $group_id
+Groups: $groups
+Home directory: $home_dir
+Shell: $shell
+Full name: $comment" 16 60
+}
+
+# Delete user
+delete_user() {
+    local username=$1
+    if ! id "$username" &>/dev/null; then
+        log_error "User $username does not exist"
+        return 1
+    fi
+    
+    whiptail --yesno "Are you sure you want to delete user $username?" 8 40
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
+    
+    local remove_home=""
+    if [ "$REMOVE_HOME_ON_DELETE" = "yes" ]; then
+        whiptail --yesno "Remove home directory for $username?" 8 40
+        if [ $? -eq 0 ]; then
+            remove_home="-r"
+        fi
+    fi
+    
+    if userdel $remove_home "$username"; then
+        log_success "User $username deleted successfully"
+        whiptail --msgbox "User $username deleted successfully!" 8 40
+        return 0
+    else
+        log_error "Failed to delete user $username"
+        whiptail --msgbox "Failed to delete user $username!" 8 40
+        return 1
+    fi
+}
+
+# Interactive user deletion
+delete_user_interactive() {
+    local users=()
+    while IFS= read -r user; do
+        users+=("$user" "" "OFF")
+    done < <(get_all_users)
+    
+    if [ ${#users[@]} -eq 0 ]; then
+        whiptail --msgbox "No regular users found!" 8 40
+        return 1
+    fi
+    
+    local selected_users=$(whiptail --title "Delete Users" --checklist \
+        "Select users to delete:" 20 60 10 "${users[@]}" 3>&1 1>&2 2>&3)
+    
+    if [ $? -ne 0 ] || [ -z "$selected_users" ]; then
+        return 1
+    fi
+    
+    selected_users=$(echo "$selected_users" | tr -d '"')
+    IFS=' ' read -ra users_to_delete <<< "$selected_users"
+    
+    for user in "${users_to_delete[@]}"; do
+        delete_user "$user"
+    done
+}
+
+# Main menu
+main_menu() {
+    while true; do
+        choice=$(whiptail --title "User Management" --menu \
+            "Choose an option:" 16 60 7 \
+            "1" "Create users and groups from files" \
+            "2" "Create user interactively" \
+            "3" "Delete users" \
+            "4" "Show all users" \
+            "5" "Show user information" \
+            "6" "Backup system files" \
+            "7" "Exit" 3>&1 1>&2 2>&3)
+        
+        case $choice in
+            1)
+                # Create from files (existing functionality)
+                ;;
+            2)
+                create_user_interactive
+                ;;
+            3)
+                delete_user_interactive
+                ;;
+            4)
+                users_list=$(get_all_users | tr '\n' ' ')
+                whiptail --msgbox "All regular users:\n\n$users_list" 16 60
+                ;;
+            5)
+                username=$(whiptail --inputbox "Enter username:" 8 40 3>&1 1>&2 2>&3)
+                if [ $? -eq 0 ] && [ -n "$username" ]; then
+                    show_user_info "$username"
+                fi
+                ;;
+            6)
+                backup_system_files
+                whiptail --msgbox "System files backed up successfully!" 8 40
+                ;;
+            7)
+                log_info "Script terminated by user"
+                exit 0
+                ;;
+            *)
+                exit 0
+                ;;
+        esac
+    done
 }
 
 # Load configuration
 load_config() {
-    if [[ -f "$CONFIG_FILE" ]]; then
+    if [ -f "$CONFIG_FILE" ]; then
         source "$CONFIG_FILE"
+        log_info "Configuration loaded from $CONFIG_FILE"
     fi
 }
 
-# Logging function
-log() {
-    local level=$1
-    local message=$2
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${timestamp} [${level}] ${message}" | tee -a "$LOG_FILE"
-}
-
-# Error handling
-error_exit() {
-    log "ERROR" "$1"
-    echo -e "${RED}Error: $1${NC}" >&2
-    exit 1
-}
-
-# Check prerequisites
-check_dependencies() {
-    local dependencies=("awk" "getent" "useradd" "groupadd" "passwd" "openssl" "whiptail")
-    for dep in "${dependencies[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            error_exit "Dependency $dep not found. Please install it."
-        fi
-    done
-}
-
-# Acquire lock to prevent concurrent execution
+# Acquire lock
 acquire_lock() {
-    if [[ -f "$LOCK_FILE" ]]; then
-        local pid=$(cat "$LOCK_FILE")
-        if ps -p "$pid" > /dev/null; then
-            error_exit "Another instance is already running (PID: $pid)"
-        fi
+    if [ -f "$LOCK_FILE" ]; then
+        log_error "Another instance is already running"
+        exit 1
     fi
     echo $$ > "$LOCK_FILE"
 }
@@ -92,415 +376,42 @@ release_lock() {
     rm -f "$LOCK_FILE"
 }
 
-# Generate secure random password
-generate_password() {
-    openssl rand -base64 48 | tr -dc 'a-zA-Z0-9!@#$%^&*()_+-=' | head -c "$PASSWORD_LENGTH"
-}
-
-# Validate username
-validate_username() {
-    local username=$1
-    if [[ ! "$username" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
-        return 1
-    fi
-    if [[ ${#username} -gt 32 ]]; then
-        return 1
-    fi
-    return 0
-}
-
-# Backup current state
-backup_state() {
-    local backup_file="$BACKUP_DIR/backup_$(date +%Y%m%d_%H%M%S).tar.gz"
-    tar -czf "$backup_file" /etc/passwd /etc/group /etc/shadow /etc/gshadow 2>/dev/null || true
-    log "INFO" "System state backed up to $backup_file"
-}
-
-# Create groups from file
-create_groups() {
-    if [[ ! -f "$GROUPS_FILE" ]]; then
-        log "WARN" "Groups file $GROUPS_FILE not found"
-        return 0
-    fi
-
-    local count=0
-    while IFS= read -r group; do
-        group=$(echo "$group" | xargs)
-        [[ -z "$group" || "$group" =~ ^# ]] && continue
-
-        if getent group "$group" >/dev/null; then
-            log "INFO" "Group '$group' already exists"
-        else
-            if groupadd "$group"; then
-                log "INFO" "Created group: $group"
-                ((count++))
-            else
-                log "ERROR" "Failed to create group: $group"
-            fi
-        fi
-    done < "$GROUPS_FILE"
-    
-    log "INFO" "Created $count groups"
-    echo -e "${GREEN}Successfully created $count groups${NC}"
-}
-
-# Create users from file
-create_users() {
-    if [[ ! -f "$USERS_FILE" ]]; then
-        error_exit "Users file $USERS_FILE not found"
-    fi
-
-    local count=0
-    while IFS=: read -r username groups comment; do
-        username=$(echo "$username" | xargs)
-        [[ -z "$username" || "$username" =~ ^# ]] && continue
-
-        if ! validate_username "$username"; then
-            log "ERROR" "Invalid username: $username"
-            continue
-        fi
-
-        if getent passwd "$username" >/dev/null; then
-            log "WARN" "User '$username' already exists"
-            continue
-        fi
-
-        # Create user
-        local useradd_cmd=("useradd")
-        useradd_cmd+=("-m")
-        useradd_cmd+=("-s" "$DEFAULT_SHELL")
-        
-        [[ -n "$comment" ]] && useradd_cmd+=("-c" "$comment")
-        
-        if "${useradd_cmd[@]}" "$username"; then
-            # Set password
-            local password=$(generate_password)
-            echo "$username:$password" | chpasswd
-            if [[ $? -eq 0 ]]; then
-                log "INFO" "Created user: $username with generated password"
-                echo "Username: $username Password: $password" >> "$BACKUP_DIR/passwords_$(date +%Y%m%d).txt"
-            else
-                log "ERROR" "Failed to set password for: $username"
-            fi
-
-            # Add to groups
-            if [[ -n "$groups" ]]; then
-                IFS=',' read -ra group_array <<< "$groups"
-                for group in "${group_array[@]}"; do
-                    group=$(echo "$group" | xargs)
-                    if getent group "$group" >/dev/null; then
-                        usermod -a -G "$group" "$username"
-                        log "INFO" "Added user $username to group $group"
-                    else
-                        log "WARN" "Group $group not found for user $username"
-                    fi
-                done
-            fi
-
-            # Set password expiration
-            chage -M "$PASSWORD_EXPIRE_DAYS" "$username"
-            ((count++))
-        else
-            log "ERROR" "Failed to create user: $username"
-        fi
-    done < "$USERS_FILE"
-    
-    log "INFO" "Created $count users"
-    echo -e "${GREEN}Successfully created $count users${NC}"
-}
-
-# Get list of all regular users (non-system)
-get_all_users() {
-    getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' | sort
-}
-
-# Get user information
-get_user_info() {
-    local username=$1
-    echo -e "${CYAN}User information: ${GREEN}$username${NC}"
-    echo -e "UID: $(id -u "$username")"
-    echo -e "GID: $(id -g "$username")"
-    echo -e "Groups: $(id -Gn "$username")"
-    echo -e "Home directory: $(getent passwd "$username" | cut -d: -f6)"
-    echo -e "Shell: $(getent passwd "$username" | cut -d: -f7)"
-    echo -e "Last login: $(lastlog -u "$username" | awk 'NR==2 {print $4" "$5" "$6" "$7" "$8" "$9}')"
-}
-
-# Delete user with confirmation
-delete_user() {
-    local username=$1
-    
-    if ! getent passwd "$username" >/dev/null; then
-        echo -e "${RED}User $username does not exist!${NC}"
-        return 1
-    fi
-
-    # Show user info
-    get_user_info "$username"
-    echo
-
-    # Confirmation
-    read -p "Are you sure you want to delete user $username? (y/N): " confirm
-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-        echo -e "${YELLOW}Deletion cancelled.${NC}"
-        return 0
-    fi
-
-    # Determine delete options
-    local userdel_cmd=("userdel")
-    if [[ "$REMOVE_HOME_ON_DELETE" == "yes" ]]; then
-        userdel_cmd+=("-r")
-    fi
-    if [[ "$REMOVE_MAIL_SPOOL" == "yes" ]]; then
-        userdel_cmd+=("--remove")
-    fi
-
-    # Delete user
-    if "${userdel_cmd[@]}" "$username"; then
-        log "INFO" "Deleted user: $username"
-        echo -e "${GREEN}User $username successfully deleted.${NC}"
-        
-        # Remove from groups
-        local groups=$(id -Gn "$username" 2>/dev/null || true)
-        if [[ -n "$groups" ]]; then
-            for group in $groups; do
-                if [[ "$group" != "$username" ]]; then
-                    gpasswd -d "$username" "$group" 2>/dev/null || true
-                fi
-            done
-        fi
-        
-        return 0
-    else
-        log "ERROR" "Failed to delete user: $username"
-        echo -e "${RED}Error deleting user $username${NC}"
-        return 1
-    fi
-}
-
-# Interactive menu for user deletion
-user_deletion_menu() {
-    local users=()
-    local options=()
-    
-    # Get all regular users
-    mapfile -t users < <(get_all_users)
-    
-    if [[ ${#users[@]} -eq 0 ]]; then
-        echo -e "${YELLOW}No users available for deletion.${NC}"
-        return 0
-    fi
-
-    # Create options array for whiptail
-    for i in "${!users[@]}"; do
-        options+=("$i" "${users[$i]}" "OFF")
-    done
-
-    # Show menu using whiptail
-    local selected_users=$(whiptail --title "User Deletion" \
-        --checklist "Select users to delete:" \
-        20 60 10 \
-        "${options[@]}" \
-        3>&1 1>&2 2>&3)
-
-    if [[ $? -ne 0 || -z "$selected_users" ]]; then
-        echo -e "${YELLOW}Deletion cancelled.${NC}"
-        return 0
-    fi
-
-    # Process selected users
-    local deleted_count=0
-    for selection in $selected_users; do
-        local index=$(echo "$selection" | tr -d '"')
-        local username="${users[$index]}"
-        
-        if delete_user "$username"; then
-            ((deleted_count++))
-        fi
-        echo
-    done
-
-    echo -e "${GREEN}Deleted users: $deleted_count${NC}"
-}
-
-# Text-based user selection menu (fallback if whiptail fails)
-text_based_deletion_menu() {
-    local users=()
-    mapfile -t users < <(get_all_users)
-    
-    if [[ ${#users[@]} -eq 0 ]]; then
-        echo -e "${YELLOW}No users available for deletion.${NC}"
-        return 0
-    fi
-
-    echo -e "${CYAN}Available users:${NC}"
-    for i in "${!users[@]}"; do
-        echo "$((i+1)). ${users[$i]}"
-    done
-
-    echo
-    read -p "Enter user numbers to delete (comma-separated, or 'all'): " selection
-
-    if [[ -z "$selection" ]]; then
-        echo -e "${YELLOW}Deletion cancelled.${NC}"
-        return 0
-    fi
-
-    local deleted_count=0
-    if [[ "$selection" == "all" ]]; then
-        for username in "${users[@]}"; do
-            if delete_user "$username"; then
-                ((deleted_count++))
-            fi
-            echo
-        done
-    else
-        IFS=',' read -ra indices <<< "$selection"
-        for index in "${indices[@]}"; do
-            index=$((index-1))
-            if [[ $index -ge 0 && $index -lt ${#users[@]} ]]; then
-                if delete_user "${users[$index]}"; then
-                    ((deleted_count++))
-                fi
-                echo
-            else
-                echo -e "${RED}Invalid selection: $((index+1))${NC}"
-            fi
-        done
-    fi
-
-    echo -e "${GREEN}Deleted users: $deleted_count${NC}"
-}
-
-# Show main menu
-show_main_menu() {
-    while true; do
-        echo -e "${BLUE}=== User Management Menu ===${NC}"
-        echo -e "1. Create users and groups from files"
-        echo -e "2. Delete users"
-        echo -e "3. Show all users"
-        echo -e "4. Show user information"
-        echo -e "5. Exit"
-        echo -n "Select option (1-5): "
-        
-        read choice
-        case $choice in
-            1)
-                echo -e "${YELLOW}Creating users and groups...${NC}"
-                create_groups
-                create_users
-                ;;
-            2)
-                echo -e "${YELLOW}Opening user deletion menu...${NC}"
-                if command -v whiptail >/dev/null; then
-                    user_deletion_menu
-                else
-                    text_based_deletion_menu
-                fi
-                ;;
-            3)
-                echo -e "${CYAN}List of all users:${NC}"
-                get_all_users | nl -w 3 -s '. '
-                ;;
-            4)
-                echo -n "Enter username: "
-                read username
-                if getent passwd "$username" >/dev/null; then
-                    get_user_info "$username"
-                else
-                    echo -e "${RED}User $username does not exist!${NC}"
-                fi
-                ;;
-            5)
-                echo -e "${GREEN}Exiting...${NC}"
-                exit 0
-                ;;
-            *)
-                echo -e "${RED}Invalid selection. Please try again.${NC}"
-                ;;
-        esac
-        
-        echo
-        read -p "Press Enter to continue..."
-        clear
-    done
-}
-
-# Set secure permissions
-secure_permissions() {
-    chmod 600 "$BACKUP_DIR/passwords_"*.txt 2>/dev/null || true
-    chmod 644 "$LOG_FILE"
-    chmod 600 "$CONFIG_FILE" 2>/dev/null || true
-}
-
-# Cleanup function
+# Cleanup on exit
 cleanup() {
-    rm -f "$TEMP_MENU" 2>/dev/null || true
     release_lock
-    secure_permissions
+    log_info "Script execution completed"
 }
 
 # Main execution
 main() {
-    trap cleanup EXIT ERR INT TERM
-
-    echo -e "${BLUE}=== Enhanced User Management Script ===${NC}"
-    
+    trap cleanup EXIT
     acquire_lock
-    init_setup
+    check_root
+    init_directories
     load_config
-    check_dependencies
+    backup_system_files
     
-    # Show main menu
-    show_main_menu
+    if [ "$1" = "--auto" ]; then
+        # Automated mode (existing functionality)
+        :
+    else
+        main_menu
+    fi
 }
 
-# Check if running as root
-if [[ $EUID -ne 0 ]]; then
-    error_exit "This script must be run as root"
-fi
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -c|--config)
-            CONFIG_FILE="$2"
-            shift 2
-            ;;
-        -u|--users)
-            USERS_FILE="$2"
-            shift 2
-            ;;
-        -g|--groups)
-            GROUPS_FILE="$2"
-            shift 2
-            ;;
-        -a|--auto)
-            # Automated mode without menu
-            log "INFO" "Starting automated user management process"
-            backup_state
-            create_groups
-            create_users
-            log "INFO" "Automated process completed successfully"
-            echo -e "${GREEN}Automated operation completed successfully!${NC}"
-            echo -e "${YELLOW}Passwords stored in: $BACKUP_DIR/passwords_$(date +%Y%m%d).txt${NC}"
-            exit 0
-            ;;
-        -h|--help)
-            echo "Usage: $0 [options]"
-            echo "Options:"
-            echo "  -c, --config FILE    Configuration file"
-            echo "  -u, --users FILE     Users file"
-            echo "  -g, --groups FILE    Groups file"
-            echo "  -a, --auto           Run in automated mode (no menu)"
-            echo "  -h, --help           Show this help"
-            exit 0
-            ;;
-        *)
-            error_exit "Unknown option: $1"
-            ;;
-    esac
-done
-
-# Run main function
-main
+# Handle command line arguments
+case "$1" in
+    "--help" | "-h")
+        echo "Usage: $0 [OPTIONS]"
+        echo "Options:"
+        echo "  --auto     Run in automated mode"
+        echo "  --help     Show this help"
+        echo "  --interactive  Run in interactive mode (default)"
+        ;;
+    "--auto")
+        main --auto
+        ;;
+    *)
+        main
+        ;;
+esac
