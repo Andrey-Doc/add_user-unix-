@@ -1,368 +1,298 @@
-# Enhanced Linux User Management Script
+🚀 Features
 
-An interactive bash script for creating and managing users in Linux with advanced features for permissions, groups, SSH keys, and system administration.
+    User Creation: Create users from a text file with auto-generated secure passwords
 
-## 🚀 Features
+    Group Management: Create groups from a text file
 
-### Core User Management
-- ✅ Create new users with home directories
-- ✅ Choose shell (bash, zsh, sh, nologin)
-- ✅ Add users to groups (sudo, docker, www-data, video, audio, disk, users)
-- ✅ Configure sudo permissions (no rights, limited, full, with password)
-- ✅ Add SSH keys (manual input, file copy, key generation)
-- ✅ Color-coded output for better UX
-- ✅ User existence validation
-- ✅ Interactive menu system
+    Interactive Menu: User-friendly text-based interface using whiptail/dialog
 
-### Advanced Features (Enhanced Version)
-- 🔄 **Logging System** - All actions logged to `/var/log/user_creation.log`
-- 💾 **Backup System** - Automatic user backup creation
-- 🗑️ **User Deletion** - Safe user removal with backup options
-- 📊 **User Information** - Detailed user information display
-- 📤 **User Export** - Export users to CSV format
-- 📥 **Batch Import** - Create users from CSV file
-- 🔐 **Auto Password** - Automatic password setting
-- ⚙️ **System Limits** - Configure user resource limits
-- 🏗️ **Environment Setup** - Create useful directories and configs
-- 🔍 **System Validation** - Check system requirements
-- 🛡️ **Enhanced Security** - Better input validation and safety checks
-- 📋 **Settings Copy** - Copy user settings from one user to another
+    User Deletion: Safe user removal with confirmation and cleanup options
 
-## Installation
+    Backup System: Automatic backup of system files before making changes
 
-1. Download the script:
-```bash
-wget https://raw.githubusercontent.com/your-repo/add_user_script/main/add_user_enhanced.sh
-```
+    Security: Secure password generation, permission management, and lock protection
 
-2. Make the script executable:
-```bash
+    Logging: Comprehensive logging of all operations
+
+    Configuration: Customizable through config file
+
+📋 Requirements
+
+    Unix/Linux system
+
+    Root privileges
+
+    Bash shell
+
+    Required packages: openssl, whiptail (or dialog)
+
+Install dependencies:
+
+Ubuntu/Debian:
+bash
+
+sudo apt-get update
+sudo apt-get install openssl whiptail
+
+CentOS/RHEL:
+bash
+
+sudo yum install openssl newt
+
+Fedora:
+bash
+
+sudo dnf install openssl newt
+
+📁 File Structure
+text
+
+/
+├── add_user.sh                  # Main script
+├── users_list.txt               # User definitions
+├── groups_list.txt              # Group definitions
+├── /etc/user_manager.conf       # Configuration file
+├── /var/log/user_management.log # Log file
+└── /var/backups/user_management/ # Backup directory
+
+⚙️ Configuration
+Configuration File (/etc/user_manager.conf)
+bash
+
+# User Management Configuration
+DEFAULT_UMASK=0022
+PASSWORD_EXPIRE_DAYS=90
+MIN_UID=1000
+MAX_UID=60000
+CREATE_HOME=yes
+SKEL_DIR=/etc/skel
+REMOVE_HOME_ON_DELETE=yes
+REMOVE_MAIL_SPOOL=yes
+
+Users File (users_list.txt)
+
+Format: username:group1,group2,group3:comment
+text
+
+# Format: username:group1,group2,group3:comment
+john:sudo,developers:John Doe
+jane:developers:Jane Smith
+bob:users:Bob Johnson
+alice:sudo,admin:Alice Brown
+
+Groups File (groups_list.txt)
+text
+
+# List of groups to create
+developers
+admin
+users
+sudo
+
+🛠️ Installation
+
+    Make it executable:
+
+bash
+
 chmod +x add_user_enhanced.sh
-```
-
-## Usage
-
-### Basic Usage
-
-```bash
-sudo ./add_user_enhanced.sh
-```
-
-**Important:** The script must be run with root privileges (sudo).
-
-### Enhanced Menu Options
-
-The enhanced script provides 8 main options:
-
-1. **Add New User** - Interactive user creation
-2. **Create Users from File** - Batch user creation from CSV
-3. **Export Users** - Export existing users to CSV
-4. **Delete User** - Remove user with backup option
-5. **Show User Information** - Display detailed user info
-6. **Create User Backup** - Backup specific user
-7. **Copy User Settings** - Copy settings from one user to another
-8. **Exit** - Quit the script
-
-## Step-by-Step Guide
-
-### 1. Adding a New User
-
-1. **Launch the script** with sudo privileges
-2. **Select "1"** to add a new user
-3. **Enter username** (validated for existence)
-4. **Enter full name** of the user
-5. **Choose UID** (optional, auto-assigned if empty)
-6. **Select shell**:
-   - `/bin/bash` (recommended)
-   - `/bin/zsh`
-   - `/bin/sh`
-   - `/sbin/nologin` (no shell access)
-7. **Choose groups** (multiple selection via comma):
-   - `sudo` - administrator rights
-   - `docker` - Docker access
-   - `www-data` - web server access
-   - `video` - video device access
-   - `audio` - audio device access
-   - `disk` - disk access
-   - `users` - standard user group
-   - Custom group (manual input)
-8. **Configure sudo rights**:
-   - No sudo rights
-   - Limited (apt, apt-get, dpkg, systemctl)
-   - Full sudo rights (no password)
-   - Sudo with password prompt
-9. **Set system limits** (optional)
-10. **Add SSH keys** (optional):
-    - Manual key input
-    - Copy from file
-    - Generate new key
-    - Skip
-11. **Set password**:
-    - Automatic password setting
-    - Interactive password setting
-12. **Confirm user creation**
-
-### 2. Batch User Creation
-
-Create a CSV file with user data:
-```csv
-username,full_name,shell,groups,sudo_level,ssh_keys
-john,John Doe,/bin/bash,sudo,docker,3,yes
-jane,Jane Smith,/bin/zsh,users,1,no
-admin,Admin User,/bin/bash,sudo,3,yes
-```
-
-Then use option 2 to import users from the file.
-
-### 3. User Export
-
-Use option 3 to export all users to a CSV file with their configurations.
-
-### 4. User Deletion
-
-Use option 4 to safely delete users with backup creation option.
-
-### 5. Copy User Settings
-
-Use option 7 to copy settings from one user to another. This function allows:
-
-**What gets copied:**
-- SSH keys and configuration (`.ssh/`)
-- Shell settings (`.bashrc`, `.zshrc`, `.profile`)
-- Application settings (`.config/`, `.mozilla`, `.thunderbird`)
-- Terminal settings (`.inputrc`, `.screenrc`, `.tmux.conf`)
-- Desktop folders (Desktop, Documents, Downloads, etc.)
-- Sudo rights and system limits
-- Editor settings (`.vimrc`, `.vim`)
-
-**Copy options:**
-1. **All settings** - Complete copy of all settings
-2. **SSH only** - Copy SSH keys and configuration
-3. **Shell only** - Copy shell settings
-4. **Applications only** - Copy application settings
-5. **System only** - Copy sudo rights and limits
-6. **Selective** - Choose specific files to copy
-
-**Security:**
-- Automatic backup creation before copying
-- Proper permission setting
-- User existence validation
-- Comprehensive logging
-
-## Examples
-
-### Creating a Regular User
-```bash
-sudo ./add_user_enhanced.sh
-# Follow the menu instructions
-```
-
-### Creating an Administrator User
-1. Launch the script
-2. Choose groups: `1,7` (sudo + users)
-3. Choose sudo rights: `3` (full)
-4. Add SSH keys if needed
-
-### Creating a Web Developer User
-1. Launch the script
-2. Choose groups: `2,3` (docker + www-data)
-3. Choose sudo rights: `2` (limited)
-4. Add SSH keys
-
-### Creating a System User (No Shell)
-1. Launch the script
-2. Choose shell: `4` (nologin)
-3. Choose groups: `3` (www-data)
-4. No sudo rights
-5. No SSH keys
-
-## File Structure
-
-After user creation, the following files are created:
-- Home directory: `/home/username`
-- SSH directory: `/home/username/.ssh/` (if keys added)
-- Authorized keys file: `/home/username/.ssh/authorized_keys`
-- Sudo configuration: `/etc/sudoers.d/username`
-- User limits: `/etc/security/limits.d/username.conf`
-- Log file: `/var/log/user_creation.log`
-- Backup directory: `/root/user_backups/`
-
-## Security Features
-
-- ✅ Root privilege verification before execution
-- ✅ User existence validation before creation
-- ✅ SSH keys installed with correct permissions (700 for directory, 600 for file)
-- ✅ Sudo rights configured through separate files in `/etc/sudoers.d/`
-- ✅ Input validation and sanitization
-- ✅ Secure user deletion with backup options
-- ✅ System requirements validation
-- ✅ Comprehensive logging for audit trail
-
-## Logging System
-
-The enhanced script includes a comprehensive logging system:
-
-- **Log file**: `/var/log/user_creation.log`
-- **Log levels**: INFO, WARNING, ERROR
-- **Timestamps**: All entries include date and time
-- **Actions logged**: User creation, deletion, modifications, errors
-- **Security**: Log file has restricted permissions (600)
-
-## Backup System
-
-- **Automatic backups**: Created before user deletion
-- **Backup location**: `/root/user_backups/`
-- **Backup format**: Compressed tar archives
-- **Naming convention**: `username_YYYYMMDD_HHMMSS.tar.gz`
-- **Contents**: Complete home directory
-
-## System Requirements
-
-- Linux system
-- Root privileges (sudo)
-- Bash shell
-- Standard Linux utilities (useradd, usermod, passwd, etc.)
-- tar (for backups)
-- chpasswd (for automatic password setting)
-
-## Troubleshooting
-
-### "Permission denied" Error
-```bash
-sudo ./add_user_enhanced.sh
-```
-
-### User Already Exists
-The script automatically checks for existing users and prompts for a different name.
-
-### SSH Issues
-Check file permissions:
-```bash
-ls -la /home/username/.ssh/
-```
-
-### Sudo Issues
-Check configuration:
-```bash
-sudo visudo -f /etc/sudoers.d/username
-```
-
-### Log File Issues
-Check log file permissions:
-```bash
-sudo chmod 600 /var/log/user_creation.log
-```
-
-### Backup Issues
-Check backup directory:
-```bash
-ls -la /root/user_backups/
-```
-
-## Advanced Features Explained
-
-### 1. Logging System
-- All script actions are logged with timestamps
-- Different log levels (INFO, WARNING, ERROR)
-- Log file location: `/var/log/user_creation.log`
-- Useful for audit trails and debugging
-
-### 2. Backup System
-- Automatic backup creation before user deletion
-- Compressed tar archives of home directories
-- Backup naming includes timestamp
-- Safe user removal with data preservation
-
-### 3. Batch Operations
-- Create multiple users from CSV file
-- Export existing users to CSV format
-- Useful for system administration and migration
-
-### 4. Enhanced Security
-- Input validation for all user inputs
-- System requirements checking
-- Secure file permissions
-- Comprehensive error handling
-
-### 5. User Information Display
-- Detailed user information including:
-  - UID/GID
-  - Home directory
-  - Shell
-  - Group memberships
-  - Sudo configuration
-  - SSH key count
-  - Last login information
-
-### 6. System Limits Configuration
-- Configures user resource limits
-- File: `/etc/security/limits.d/username.conf`
-- Sets file descriptor limits
-- Sets process limits
-
-### 7. Environment Setup
-- Creates useful directories (bin, src, downloads, documents)
-- Copies default configuration files
-- Sets proper ownership and permissions
-
-### 8. User Settings Copy
-- Complete copy of all settings from one user to another
-- Selective copying of specific settings
-- SSH keys and configuration copying
-- Shell and application settings copying
-- Sudo rights and system limits copying
-- Automatic backup creation
-- Secure permission setting
-
-## CSV File Format for Batch Import
-
-```csv
-username,full_name,shell,groups,sudo_level,ssh_keys
-john,John Doe,/bin/bash,sudo,docker,3,yes
-jane,Jane Smith,/bin/zsh,users,1,no
-admin,Admin User,/bin/bash,sudo,3,yes
-```
-
-**Fields:**
-- `username`: User login name
-- `full_name`: User's full name
-- `shell`: Login shell path
-- `groups`: Comma-separated group list
-- `sudo_level`: 1=none, 2=limited, 3=full, 4=with password
-- `ssh_keys`: yes/no for SSH key setup
-
-## Version History
-
-### Version 2.0 (Enhanced)
-- Added comprehensive logging system
-- Added backup functionality
-- Added user deletion with safety checks
-- Added batch user creation from CSV
-- Added user export to CSV
-- Added user information display
-- Added system limits configuration
-- Added environment setup
-- Added automatic password setting
-- Added system requirements validation
-- Added user settings copy functionality
-- Enhanced security features
-- Improved error handling
-
-### Version 1.0 (Basic)
-- Basic user creation
-- Group management
-- SSH key configuration
-- Sudo rights configuration
-- Interactive menu
-
-## License
-
-MIT License
-
-## Author
-
-Assistant - 2024
-
-## Contributing
-
-Feel free to submit issues and enhancement requests! 
+
+    Create configuration files:
+
+bash
+
+sudo mkdir -p /var/backups/user_management
+sudo touch /var/log/user_management.log
+
+    Create sample data files:
+
+bash
+
+# Create users_list.txt
+cat > users_list.txt << EOF
+john:sudo,developers:John Doe
+jane:developers:Jane Smith
+bob:users:Bob Johnson
+EOF
+
+# Create groups_list.txt
+cat > groups_list.txt << EOF
+developers
+admin
+users
+sudo
+EOF
+
+📖 Usage
+Interactive Mode (Recommended)
+bash
+
+sudo ./add_user.sh
+
+This will launch the interactive menu with the following options:
+
+    Create users and groups from files - Processes users_list.txt and groups_list.txt
+
+    Delete users - Interactive user deletion menu
+
+    Show all users - Display list of all regular users
+
+    Show user information - Detailed info about specific user
+
+    Exit - Quit the script
+
+Automated Mode
+bash
+
+sudo ./add_user.sh --auto
+
+Runs in non-interactive mode, automatically creating users and groups from files.
+Custom File Locations
+bash
+
+sudo ./add_user.sh --users custom_users.txt --groups custom_groups.txt --config /path/to/config.conf
+
+Help Command
+bash
+
+sudo ./add_user.sh --help
+
+🎯 Step-by-Step Guide
+Step 1: Prepare Your Files
+
+    Edit users_list.txt with your users:
+
+bash
+
+nano users_list.txt
+
+    Edit groups_list.txt with your groups:
+
+bash
+
+nano groups_list.txt
+
+Step 2: Run the Script
+bash
+
+sudo ./add_user.sh
+
+Step 3: Using the Menu
+
+    Select option 1 to create users and groups
+
+    The script will:
+
+        Backup system files
+
+        Create groups from groups_list.txt
+
+        Create users from users_list.txt
+
+        Generate secure passwords
+
+        Set password expiration policies
+
+        Save passwords to backup directory
+
+    Passwords are stored in:
+
+bash
+
+/var/backups/user_management/passwords_YYYYMMDD.txt
+
+Step 4: Managing Users
+
+    View all users: Select option 3 from menu
+
+    Get user info: Select option 4 and enter username
+
+    Delete users: Select option 2 for interactive deletion menu
+
+🔒 Security Features
+
+    Automatic backups of /etc/passwd, /etc/group, /etc/shadow, /etc/gshadow
+
+    Secure password generation using OpenSSL (16 characters, mixed character sets)
+
+    File permission enforcement for sensitive files
+
+    Password expiration policies enforced by default
+
+    Lock protection to prevent concurrent execution
+
+    Input validation for all user operations
+
+    Secure temporary file handling
+
+⚠️ Safety Features
+
+    Confirmation prompts for destructive operations
+
+    Dry-run mode available for testing
+
+    Comprehensive error checking and handling
+
+    Rollback capability from backups in case of errors
+
+    User existence verification before operations
+
+🔧 Advanced Usage
+Custom Configuration
+
+Create a custom configuration file:
+bash
+
+sudo nano /etc/user_manager_custom.conf
+
+Then run with custom config:
+bash
+
+sudo ./add_user.sh --config /etc/user_manager_custom.conf
+
+Logging and Debugging
+
+Enable verbose logging:
+bash
+
+sudo ./add_user.sh --verbose
+
+View logs:
+bash
+
+tail -f /var/log/user_management.log
+
+Password Policy Customization
+
+Modify the password generation function in the script to meet your organization's requirements:
+bash
+
+# In the script, look for the generate_password function
+generate_password() {
+    # Customize this function for your needs
+    openssl rand -base64 16 | tr -d '/+=' | cut -c1-16
+}
+
+🐛 Troubleshooting
+Common Issues
+
+    Permission denied errors
+
+        Ensure script is run with sudo
+
+        Verify backup directory permissions
+
+    Whiptail/dialog not found
+
+        Install required packages as shown in Requirements section
+
+    User/group already exists
+
+        Script will skip existing users/groups by default
+
+Debug Mode
+
+Run with debug output:
+bash
+
+sudo ./add_user.sh --debug
